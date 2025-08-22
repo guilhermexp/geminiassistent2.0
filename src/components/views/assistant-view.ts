@@ -55,7 +55,7 @@ export class AssistantView extends LitElement {
 
     .user-profile-container {
       position: absolute;
-      top: 2vh;
+      bottom: 2vh;
       right: 2vw;
       z-index: 20;
     }
