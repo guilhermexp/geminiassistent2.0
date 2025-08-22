@@ -15,13 +15,22 @@ interface UserData {
 const demoUser: UserData = {
   name: 'Jane Doe',
   email: 'jane@example.com',
-  avatar: 'https://github.com/educlopez.png',
+  avatar: '/avatars/default.png',
 };
 
 @customElement('gdm-user-profile')
 export class GdmUserProfile extends LitElement {
   @property({type: String}) activePersona: string | null = null;
   @state() private user: UserData = demoUser;
+
+  // Map personas to their avatar images
+  private personaAvatars: Record<string, string> = {
+    'tutor': '/avatars/tutor.png',
+    'coding-engineer': '/avatars/coding-engineer.png',
+    'direct': '/avatars/direct.png',
+    'data-analyst': '/avatars/data-analyst.png',
+    'default': '/avatars/default.png'
+  };
 
   @state() private isDropdownOpen = false;
   @state() private isEditModalOpen = false;
@@ -44,109 +53,75 @@ export class GdmUserProfile extends LitElement {
       border-radius: 50%;
       cursor: pointer;
       border: 2px solid rgba(255, 255, 255, 0.3);
-      transition: border-color 0.2s;
+      transition: border-color 0.2s, transform 0.2s;
+      object-fit: cover;
+      object-position: center 20%;
+      transform: scale(1.4);
+      overflow: hidden;
     }
 
     .avatar:hover {
       border-color: #5078ff;
+      transform: scale(1.5);
     }
 
     .dropdown {
       position: absolute;
       bottom: calc(100% + 12px);
       right: 0;
-      background: linear-gradient(135deg, #1e1e1e 0%, #2a2a2a 100%);
-      border: 1px solid rgba(80, 120, 255, 0.2);
-      border-radius: 16px;
+      background: #2a2a2a;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
       padding: 12px;
       z-index: 100;
       min-width: 260px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 
-                  0 0 80px rgba(80, 120, 255, 0.1);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
       display: flex;
       flex-direction: column;
       gap: 2px;
-      backdrop-filter: blur(20px);
-      animation: slideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+      animation: fadeIn 0.2s ease;
     }
 
-    @keyframes slideUp {
+    @keyframes fadeIn {
       from {
         opacity: 0;
-        transform: translateY(10px) scale(0.95);
+        transform: translateY(5px);
       }
       to {
         opacity: 1;
-        transform: translateY(0) scale(1);
+        transform: translateY(0);
       }
-    }
-
-    .dropdown::after {
-      content: '';
-      position: absolute;
-      bottom: -8px;
-      right: 20px;
-      width: 0;
-      height: 0;
-      border-left: 8px solid transparent;
-      border-right: 8px solid transparent;
-      border-top: 8px solid #1e1e1e;
     }
 
     .dropdown-item {
       display: flex;
       align-items: center;
-      gap: 14px;
-      padding: 12px 14px;
-      border-radius: 10px;
+      gap: 12px;
+      padding: 10px 12px;
+      border-radius: 8px;
       cursor: pointer;
-      transition: all 0.2s ease;
+      transition: background-color 0.15s ease;
       background: none;
       border: none;
-      color: rgba(255, 255, 255, 0.85);
+      color: rgba(255, 255, 255, 0.9);
       text-align: left;
       font-size: 14px;
-      font-weight: 500;
-      position: relative;
-      overflow: hidden;
-    }
-
-    .dropdown-item::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 0;
-      height: 100%;
-      background: linear-gradient(90deg, transparent, rgba(80, 120, 255, 0.1));
-      transition: width 0.3s ease;
+      font-weight: 400;
     }
 
     .dropdown-item:hover {
-      background: rgba(80, 120, 255, 0.08);
-      color: #fff;
-      transform: translateX(2px);
-    }
-
-    .dropdown-item:hover::before {
-      width: 100%;
-    }
-
-    .dropdown-item:hover svg {
-      transform: scale(1.1);
-      filter: drop-shadow(0 0 6px rgba(80, 120, 255, 0.5));
+      background: rgba(255, 255, 255, 0.05);
     }
 
     .dropdown-divider {
       height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
-      margin: 8px 4px;
+      background: rgba(255, 255, 255, 0.08);
+      margin: 6px 4px;
     }
 
     .dropdown-item svg {
       flex-shrink: 0;
-      transition: all 0.2s ease;
-      color: rgba(80, 120, 255, 0.8);
+      color: rgba(255, 255, 255, 0.6);
     }
 
     .dropdown-header {
@@ -165,7 +140,10 @@ export class GdmUserProfile extends LitElement {
       width: 40px;
       height: 40px;
       border-radius: 50%;
-      border: 2px solid rgba(80, 120, 255, 0.3);
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      object-fit: cover;
+      object-position: center 20%;
+      transform: scale(1.3);
     }
 
     .user-details {
@@ -322,6 +300,14 @@ export class GdmUserProfile extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     document.body.addEventListener('click', this.handleOutsideClick);
+    
+    // Set initial avatar based on activePersona
+    if (this.activePersona) {
+      const avatarPath = this.personaAvatars[this.activePersona];
+      if (avatarPath) {
+        this.user = {...this.user, avatar: avatarPath};
+      }
+    }
   }
 
   disconnectedCallback() {
@@ -360,6 +346,12 @@ export class GdmUserProfile extends LitElement {
   }
 
   private selectPersona(persona: string | null) {
+    // Update the avatar based on selected persona
+    const avatarPath = persona ? this.personaAvatars[persona] : this.personaAvatars['default'];
+    if (avatarPath) {
+      this.user = {...this.user, avatar: avatarPath};
+    }
+    
     this.dispatchEvent(
       new CustomEvent('persona-change', {
         detail: {persona},
@@ -376,10 +368,15 @@ export class GdmUserProfile extends LitElement {
   }
 
   render() {
+    // Get current avatar based on active persona
+    const currentAvatar = this.activePersona 
+      ? this.personaAvatars[this.activePersona] || this.user.avatar
+      : this.user.avatar;
+
     return html`
       <div>
         <img
-          src="${this.user.avatar}"
+          src="${currentAvatar}"
           alt="User Avatar"
           class="avatar"
           @click=${this.toggleDropdown} />
@@ -389,7 +386,7 @@ export class GdmUserProfile extends LitElement {
               <div class="dropdown">
                 <div class="dropdown-header">
                   <div class="user-info">
-                    <img src="${this.user.avatar}" alt="${this.user.name}" />
+                    <img src="${currentAvatar}" alt="${this.user.name}" />
                     <div class="user-details">
                       <div class="user-name">${this.user.name}</div>
                       <div class="user-email">${this.user.email}</div>
