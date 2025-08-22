@@ -231,47 +231,73 @@ export class GdmAnalysisForm extends LitElement {
       position: absolute;
       top: calc(100% + 8px); /* Position dropdown below the button */
       right: 0;
-      background: #2a2a2a;
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      border-radius: 8px;
-      padding: 8px;
+      background: rgba(20, 20, 30, 0.95);
+      border: 1px solid rgba(80, 120, 255, 0.3);
+      border-radius: 16px;
+      padding: 12px;
       z-index: 10;
-      width: 280px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      width: 320px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 8px;
     }
     .mode-menu button {
       width: 100%;
-      padding: 10px 12px;
-      border-radius: 6px;
-      border: 2px solid transparent;
-      background: transparent;
+      padding: 14px 16px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.02);
       color: white;
       cursor: pointer;
       display: flex;
       flex-direction: column;
       align-items: flex-start;
       text-align: left;
-      transition: all 0.2s;
+      transition: all 0.3s ease;
+      position: relative;
+    }
+    .mode-menu button::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(135deg, rgba(80, 120, 255, 0.1) 0%, transparent 100%);
+      opacity: 0;
+      transition: opacity 0.3s ease;
     }
     .mode-menu button:hover {
-      background: rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(80, 120, 255, 0.4);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(80, 120, 255, 0.2);
+    }
+    .mode-menu button:hover::before {
+      opacity: 1;
     }
     .mode-menu button.active {
       border-color: #5078ff;
-      background: rgba(80, 120, 255, 0.1);
+      background: linear-gradient(135deg, rgba(80, 120, 255, 0.2) 0%, rgba(80, 120, 255, 0.05) 100%);
+      box-shadow: 0 4px 16px rgba(80, 120, 255, 0.3);
     }
     .mode-menu strong {
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 600;
       margin-bottom: 2px;
+      color: #ffffff;
+      position: relative;
+      z-index: 1;
     }
     .mode-menu span {
       font-size: 12px;
-      color: #ccc;
+      color: rgba(255, 255, 255, 0.7);
       line-height: 1.4;
+      position: relative;
+      z-index: 1;
     }
 
     @media (max-width: 480px) {
@@ -475,9 +501,9 @@ export class GdmAnalysisForm extends LitElement {
         return svg`<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#A9BFFF"><path d="m321-240-57-57 179-179-179-179 57-57 236 236-236 236Zm318 0-57-57 179-179-179-179 57-57 236 236-236 236Z"/></svg>`;
       }
       if (this.selectedMode === 'workflow') {
-         return svg`<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#A9BFFF"><path d="M280-440v-80h-40q-50 0-85-35t-35-85v-120h80v120q0 17 11.5 28.5T240-600h40v-80h320v80h40q17 0 28.5-11.5T680-600v-120h80v120q0 50-35 85t-85 35h-40v80H280Zm-40-200q-17 0-28.5-11.5T200-680v-120h80v120H240Zm480 0v-120h80v120h-80Z"/></svg>`;
+         return svg`<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#A9BFFF"><path d="M200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h440l200 200v440q0 33-23.5 56.5T760-120H200Zm0-80h560v-400H600v-160H200v560Zm80-80h400v-80H280v80Zm0-160h400v-80H280v80Zm0-160h280v-80H280v80Zm-80 400v-560 560Z"/></svg>`;
       }
-      return svg`<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#ffffff"><path d="M440-120v-240h80v80h320v80H520v80h-80ZM120-200v-80h240v80H120Zm160-160v-80h480v80H280ZM120-520v-80h560v80H120Zm320-160v-80h240v80H440ZM120-840v-80h240v80H120Z"/></svg>`;
+      return svg`<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#ffffff"><path d="M320-240h320v-80H320v80Zm0-160h320v-80H320v80ZM240-80q-33 0-56.5-23.5T160-160v-640q0-33 23.5-56.5T240-880h320l240 240v480q0 33-23.5 56.5T720-80H240Zm280-520v-200H240v640h480v-440H520ZM240-800v200-200 640-640Z"/></svg>`;
     };
     return html`
       <div class="input-container">
