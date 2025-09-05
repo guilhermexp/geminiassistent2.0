@@ -19,7 +19,8 @@ import '../controls/media-controls';
 import '../modals/timeline-modal';
 import '../modals/history-modal';
 import '../ui/user-profile';
-import '../visualization/visual-3d';
+import '../visualization/orb-lite';
+// 3D visuals are lazy-loaded when enabled via env
 
 /**
  * A component that encapsulates the main user interface for the assistant,
@@ -44,6 +45,12 @@ export class AssistantView extends LitElement {
     progress: 0,
   };
   @property({type: String}) activePersona: string | null = null;
+  // Health overlay
+  @property({type: Number}) bufferSeconds = 0;
+  @property({type: Number}) pendingSeconds = 0;
+  @property({type: Number}) retryCount = 0;
+  @property({type: Boolean}) isConnecting = false;
+  private threeLoaded = false;
 
   static styles = css`
     :host {
@@ -127,7 +134,46 @@ export class AssistantView extends LitElement {
     .search-results a:hover {
       text-decoration: underline;
     }
+
+    .health-bottom {
+      align-self: center;
+      font-family: system-ui, sans-serif;
+      font-size: 11px;
+      color: rgba(229, 231, 235, 0.9);
+      background: rgba(0, 0, 0, 0.22);
+      border-radius: 999px;
+      padding: 4px 10px;
+      backdrop-filter: blur(6px);
+      display: inline-flex;
+      gap: 10px;
+      align-items: center;
+      pointer-events: none;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+      margin-top: 8px;
+    }
+    .status { opacity: 0.9; }
+    .status.warn { color: #fde68a; }
+    .metric { opacity: 0.9; }
+    .metric.warn { color: #fde68a; }
+    .metric.err { color: #fca5a5; }
+    .sep { opacity: 0.4; }
   `;
+
+  get enable3D() {
+    return (process.env.ENABLE_3D || '').toLowerCase() === 'true';
+  }
+
+  protected async firstUpdated() {
+    if (this.enable3D) {
+      try {
+        await import('../visualization/visual-3d');
+        this.threeLoaded = true;
+        this.requestUpdate();
+      } catch (e) {
+        console.error('Falha ao carregar visualização 3D:', e);
+      }
+    }
+  }
 
   private onTimelineModalClose() {
     this.dispatchEvent(
@@ -159,6 +205,7 @@ export class AssistantView extends LitElement {
 
   render() {
     return html`
+      
       <gdm-timeline-modal
         .show=${this.showTimelineModal}
         .events=${this.timelineEvents}
@@ -216,10 +263,29 @@ export class AssistantView extends LitElement {
           .hasTimelineEvents=${
             this.timelineEvents.length > 0
           }></gdm-media-controls>
+        <div class="health-bottom">
+          <span class="status ${this.isConnecting ? 'warn' : ''}">
+            ${this.isConnecting ? 'Conectando' : 'Conectado'}
+          </span>
+          <span class="sep">•</span>
+          <span class="metric ${
+            this.bufferSeconds < 0.06 ? 'err' : this.bufferSeconds < 0.12 ? 'warn' : ''
+          }">Buffer: ${Math.round(this.bufferSeconds * 1000)} ms</span>
+          <span class="sep">•</span>
+          <span class="metric">Fila: ${Math.round(this.pendingSeconds * 1000)} ms</span>
+          <span class="sep">•</span>
+          <span class="metric">Tent.: ${this.retryCount}</span>
+        </div>
       </div>
-      <gdm-live-audio-visuals-3d
-        .inputNode=${this.inputNode}
-        .outputNode=${this.outputNode}></gdm-live-audio-visuals-3d>
+      ${this.enable3D && this.threeLoaded
+        ? html`<gdm-live-audio-visuals-3d
+            .inputNode=${this.inputNode}
+            .outputNode=${this.outputNode}></gdm-live-audio-visuals-3d>`
+        : html`<gdm-orb-lite
+            size="clamp(200px, 32vmin, 480px)"
+            .animationDuration=${18}
+            .paused=${this.isRecording || this.bufferSeconds < 0.06}
+          ></gdm-orb-lite>`}
     `;
   }
 }
