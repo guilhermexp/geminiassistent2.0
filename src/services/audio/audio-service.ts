@@ -48,6 +48,18 @@ export class AudioService {
   private outputSources = new Set<AudioBufferSourceNode>();
   private nextStartTime = 0;
   private workletModuleAdded = false;
+  // Input batching state (40ms @16kHz => 640 samples)
+  private readonly INPUT_SAMPLE_RATE = 16000;
+  private readonly INPUT_BATCH_SAMPLES = 640;
+  private pendingInputChunks: Float32Array[] = [];
+  private pendingSamples = 0;
+  // Output pacing state
+  private readonly OUTPUT_SAMPLE_RATE = 24000;
+  private readonly START_PREBUFFER_SEC = 0.25;
+  private readonly MAX_BUFFER_SEC = 0.35;
+  private readonly SCHEDULE_MARGIN_SEC = 0.05;
+  private outputPendingBase64: string[] = [];
+  private schedulingOutput = false;
 
   constructor(options: AudioServiceOptions) {
     this.onInputAudio = options.onInputAudio;
@@ -115,8 +127,9 @@ export class AudioService {
     );
 
     this.audioWorkletNode.port.onmessage = (event) => {
-      const pcmData = event.data; // This is a Float32Array
-      this.onInputAudio(createBlob(pcmData));
+      const pcmData: Float32Array = event.data; // Float32Array
+      this.enqueueInput(pcmData);
+      this.drainInputBatches();
     };
 
     // The visualizer taps into `inputNode`. The worklet also gets data from it.
@@ -133,6 +146,8 @@ export class AudioService {
     if (!this.mediaStream) return;
 
     if (this.audioWorkletNode) {
+      // Flush any remaining input
+      this.flushPendingInput();
       this.audioWorkletNode.port.onmessage = null;
       // Disconnect the input node from the worklet, leaving other connections intact
       this.inputNode.disconnect(this.audioWorkletNode);
@@ -155,32 +170,9 @@ export class AudioService {
    * @param base64Data The base64-encoded audio data to play.
    */
   public async playAudioChunk(base64Data: string): Promise<void> {
-    if (this.outputSources.size === 0) {
-      this.nextStartTime = this.outputAudioContext.currentTime + 0.1;
-    }
-
-    this.nextStartTime = Math.max(
-      this.nextStartTime,
-      this.outputAudioContext.currentTime,
-    );
-
-    const audioBuffer = await decodeAudioData(
-      decode(base64Data),
-      this.outputAudioContext,
-      24000,
-      1,
-    );
-
-    const source = this.outputAudioContext.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(this.outputNode);
-    source.addEventListener('ended', () => {
-      this.outputSources.delete(source);
-    });
-
-    source.start(this.nextStartTime);
-    this.nextStartTime += audioBuffer.duration;
-    this.outputSources.add(source);
+    // Enqueue and schedule when there is room to keep latency low
+    this.outputPendingBase64.push(base64Data);
+    this.scheduleOutputIfNeeded();
   }
 
   /**
@@ -192,5 +184,130 @@ export class AudioService {
       this.outputSources.delete(source);
     }
     this.nextStartTime = 0;
+    // Drop any queued audio to prioritize barge-in
+    this.outputPendingBase64 = [];
+  }
+
+  /**
+   * Returns the number of seconds of audio currently scheduled ahead of
+   * the AudioContext's current time. Useful for UI health indicators.
+   */
+  public getBufferedOutputSeconds(): number {
+    const now = this.outputAudioContext.currentTime;
+    return Math.max(0, this.nextStartTime - now);
+  }
+
+  /** Returns true if there is audio scheduled or waiting to be scheduled. */
+  public hasActiveOutput(): boolean {
+    return this.outputSources.size > 0 || this.outputPendingBase64.length > 0;
+  }
+
+  /** Returns an estimate of queued audio (not yet scheduled) in seconds. */
+  public getPendingOutputSeconds(): number {
+    let bytes = 0;
+    for (const b64 of this.outputPendingBase64) {
+      bytes += this.base64ByteLength(b64);
+    }
+    const samples = bytes / 2; // Int16 mono
+    return samples / this.OUTPUT_SAMPLE_RATE;
+  }
+
+  private base64ByteLength(b64: string): number {
+    // Compute bytes from base64 length without decoding
+    const len = b64.length;
+    let padding = 0;
+    if (b64.endsWith('==')) padding = 2;
+    else if (b64.endsWith('=')) padding = 1;
+    return Math.floor((len * 3) / 4) - padding;
+  }
+
+  private async scheduleOutputIfNeeded() {
+    if (this.schedulingOutput) return;
+    this.schedulingOutput = true;
+    try {
+      while (
+        this.outputPendingBase64.length > 0 &&
+        this.getBufferedOutputSeconds() < this.MAX_BUFFER_SEC
+      ) {
+        // Compute start time with prebuffer when starting from empty
+        if (this.outputSources.size === 0) {
+          this.nextStartTime =
+            this.outputAudioContext.currentTime + this.START_PREBUFFER_SEC;
+        }
+        // Maintain a margin to avoid underflows
+        this.nextStartTime = Math.max(
+          this.nextStartTime,
+          this.outputAudioContext.currentTime + this.SCHEDULE_MARGIN_SEC,
+        );
+
+        const base64Data = this.outputPendingBase64.shift()!;
+        const audioBuffer = await decodeAudioData(
+          decode(base64Data),
+          this.outputAudioContext,
+          24000,
+          1,
+        );
+
+        const source = this.outputAudioContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(this.outputNode);
+        source.addEventListener('ended', () => {
+          this.outputSources.delete(source);
+          // Try to schedule more when space frees up
+          this.scheduleOutputIfNeeded();
+        });
+
+        source.start(this.nextStartTime);
+        this.nextStartTime += audioBuffer.duration;
+        this.outputSources.add(source);
+      }
+    } finally {
+      this.schedulingOutput = false;
+    }
+  }
+
+  // -------------------------
+  // Input batching helpers
+  // -------------------------
+  private enqueueInput(chunk: Float32Array) {
+    if (!chunk || chunk.length === 0) return;
+    this.pendingInputChunks.push(chunk);
+    this.pendingSamples += chunk.length;
+  }
+
+  private drainInputBatches() {
+    while (this.pendingSamples >= this.INPUT_BATCH_SAMPLES) {
+      const out = new Float32Array(this.INPUT_BATCH_SAMPLES);
+      let remaining = this.INPUT_BATCH_SAMPLES;
+      let offset = 0;
+      while (remaining > 0 && this.pendingInputChunks.length > 0) {
+        const head = this.pendingInputChunks[0];
+        const toCopy = Math.min(remaining, head.length);
+        out.set(head.subarray(0, toCopy), offset);
+        offset += toCopy;
+        remaining -= toCopy;
+        if (toCopy === head.length) {
+          this.pendingInputChunks.shift();
+        } else {
+          this.pendingInputChunks[0] = head.subarray(toCopy);
+        }
+      }
+      this.pendingSamples -= this.INPUT_BATCH_SAMPLES;
+      this.onInputAudio(createBlob(out));
+    }
+  }
+
+  private flushPendingInput() {
+    if (this.pendingSamples === 0) return;
+    // Concatenate remaining into a single chunk and send
+    const out = new Float32Array(this.pendingSamples);
+    let offset = 0;
+    while (this.pendingInputChunks.length > 0) {
+      const buf = this.pendingInputChunks.shift()!;
+      out.set(buf, offset);
+      offset += buf.length;
+    }
+    this.pendingSamples = 0;
+    this.onInputAudio(createBlob(out));
   }
 }

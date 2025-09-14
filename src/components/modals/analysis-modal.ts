@@ -5,8 +5,6 @@
 import {LitElement, css, html, svg} from 'lit';
 import {customElement, property, state} from 'lit/decorators.js';
 import {unsafeHTML} from 'lit/directives/unsafe-html.js';
-import {marked} from 'marked';
-import jsPDF from 'jspdf';
 import type {Analysis} from '../../types/types';
 import '../controls/video-player.js';
 import '../ui/copy-button.ts';
@@ -21,6 +19,7 @@ export class GdmAnalysisPanel extends LitElement {
   @state() private isActionsMenuOpen = false;
   @state() private activeTab: 'analysis' | 'json' = 'analysis';
   private lastProcessedPreviewData: string | undefined = undefined;
+  private _marked: any | null = null;
 
   static styles = css`
     :host {
@@ -463,7 +462,8 @@ export class GdmAnalysisPanel extends LitElement {
 
     try {
       const {default: html2canvas} = await import('html2canvas');
-      const pdf = new jsPDF({orientation: 'p', unit: 'pt', format: 'a4'});
+      const {default: JsPDF} = await import('jspdf');
+      const pdf = new JsPDF({orientation: 'p', unit: 'pt', format: 'a4'});
       await pdf.html(contentElement, {
         callback: (doc) => {
           doc.save(`${this.sanitizeFilename(currentAnalysis.title)}.pdf`);
@@ -523,11 +523,16 @@ export class GdmAnalysisPanel extends LitElement {
   }
 
   private renderDefaultAnalysis(analysis: Analysis) {
-    return html`
-      <div id="analysis-content-for-pdf" class="analysis-text-content">
-        ${unsafeHTML(marked.parse(analysis.summary) as string)}
-      </div>
-    `;
+    if (!this._marked) {
+      // Lazy-load marked on first use
+      this.ensureMarked();
+      return html`<div id="analysis-content-for-pdf" class="analysis-text-content">
+        <pre>${analysis.summary}</pre>
+      </div>`;
+    }
+    return html`<div id="analysis-content-for-pdf" class="analysis-text-content">
+      ${unsafeHTML(this._marked.parse(analysis.summary) as string)}
+    </div>`;
   }
 
   private renderWorkflowTabs(analysis: Analysis) {
@@ -599,10 +604,10 @@ export class GdmAnalysisPanel extends LitElement {
         ${
           this.activeTab === 'analysis'
             ? html`
-                <div
-                  id="analysis-content-for-pdf"
-                  class="analysis-text-content">
-                  ${unsafeHTML(marked.parse(summaryMarkdown) as string)}
+                <div id="analysis-content-for-pdf" class="analysis-text-content">
+                  ${this._marked
+                    ? unsafeHTML(this._marked.parse(summaryMarkdown) as string)
+                    : html`<pre>${summaryMarkdown}</pre>`}
                 </div>
               `
             : html`
@@ -631,6 +636,17 @@ export class GdmAnalysisPanel extends LitElement {
         }
       </div>
     `;
+  }
+
+  private async ensureMarked() {
+    if (this._marked) return;
+    try {
+      const mod = await import('marked');
+      this._marked = mod.marked || mod; // handle ESM/CJS default
+      this.requestUpdate();
+    } catch (e) {
+      console.error('Falha ao carregar marked dinamicamente:', e);
+    }
   }
 
   render() {
