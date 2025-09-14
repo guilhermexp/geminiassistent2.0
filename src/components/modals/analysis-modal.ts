@@ -175,13 +175,14 @@ export class GdmAnalysisPanel extends LitElement {
     }
 
     .preview-container {
-      margin-bottom: 16px;
+      margin: 8px auto 12px;
       background: #000;
       border-radius: 8px;
       overflow: hidden;
       position: relative;
       width: 100%;
-      aspect-ratio: 16 / 9;
+      max-width: 520px;
+      height: clamp(140px, 22vh, 240px);
       flex-shrink: 0;
       border: 1px solid rgba(255, 255, 255, 0.1);
     }

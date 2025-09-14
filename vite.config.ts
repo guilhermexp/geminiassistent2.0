@@ -7,6 +7,7 @@ export default defineConfig(({ mode }) => {
       define: {
         'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY || env.API_KEY),
         'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY || env.API_KEY),
+        'process.env.FIRECRAWL_API_KEY': JSON.stringify(env.FIRECRAWL_API_KEY),
         // Enable or disable 3D visuals at build/runtime: set ENABLE_3D=true
         'process.env.ENABLE_3D': JSON.stringify(env.ENABLE_3D ?? 'false'),
         // Comma-separated list of live model slugs to try in order

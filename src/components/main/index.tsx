@@ -20,6 +20,7 @@ import type {
 // Import the new shell and view components
 import '../shell/assistant-shell';
 import '../views/assistant-view';
+import '../shell/app-sidebar';
 
 // Import sub-components that are passed as slots or used directly
 import '../modals/analysis-modal'; // for gdm-analysis-panel
@@ -817,7 +818,24 @@ export class GdmLiveAudio extends LitElement {
 
   render() {
     return html`
-      <gdm-assistant-shell .panelOpen=${this.showAnalysisPanel}>
+      <gdm-assistant-shell
+        .panelOpen=${this.showAnalysisPanel}
+        @show-analysis=${() => (this.showAnalysisPanel = !this.showAnalysisPanel)}
+        @show-timeline=${() => (this.showTimelineModal = true)}
+        @close-timeline=${() => (this.showTimelineModal = false)}
+        @show-history=${() => (this.showHistoryModal = true)}
+        @close-history=${() => (this.showHistoryModal = false)}
+        @reset=${this.reset}
+        @load-session=${this.loadSession}
+        @delete-session=${this.deleteSession}
+        @analysis-remove=${this.removeAnalysis}
+      >
+        <gdm-app-sidebar
+          slot="sidebar"
+          .panelOpen=${this.showAnalysisPanel}
+          .analyses=${this.analyses}
+          .savedSessions=${this.savedSessions}>
+        </gdm-app-sidebar>
         <gdm-analysis-panel
           slot="analysis-panel"
           .show=${this.showAnalysisPanel}
@@ -849,11 +867,6 @@ export class GdmLiveAudio extends LitElement {
           @stop-recording=${this.stopRecording}
           @reset=${this.reset}
           @clear-contexts=${this.clearContexts}
-          @show-analysis=${() => (this.showAnalysisPanel = !this.showAnalysisPanel)}
-          @show-timeline=${() => (this.showTimelineModal = true)}
-          @close-timeline=${() => (this.showTimelineModal = false)}
-          @show-history=${() => (this.showHistoryModal = true)}
-          @close-history=${() => (this.showHistoryModal = false)}
           @save-session=${this.saveCurrentSession}
           @load-session=${this.loadSession}
           @delete-session=${this.deleteSession}

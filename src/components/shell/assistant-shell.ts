@@ -25,6 +25,26 @@ export class AssistantShell extends LitElement {
       overflow: hidden;
     }
 
+    .sidebar-container {
+      width: 320px;
+      min-width: 280px;
+      max-width: 360px;
+      height: 100%;
+      background: transparent;
+      display: flex;
+      align-items: stretch;
+      justify-content: stretch;
+      border-right: 1px solid rgba(255, 255, 255, 0.2);
+      z-index: 2;
+      box-sizing: border-box;
+    }
+
+    /* Make slotted sidebar fill the container fully */
+    .sidebar-container ::slotted(*) {
+      width: 100%;
+      height: 100%;
+    }
+
     .analysis-panel-container {
       flex-shrink: 0;
       overflow: hidden;
@@ -144,6 +164,9 @@ export class AssistantShell extends LitElement {
 
   render() {
     return html`
+      <div class="sidebar-container">
+        <slot name="sidebar"></slot>
+      </div>
       <div class="analysis-panel-container">
         <slot name="analysis-panel"></slot>
       </div>
