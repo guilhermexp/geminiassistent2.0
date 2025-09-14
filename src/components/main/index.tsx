@@ -57,10 +57,6 @@ export class GdmLiveAudio extends LitElement {
   @state() inputNode?: GainNode;
   @state() outputNode?: GainNode;
   @state() activePersona: string | null = null;
-  @state() bufferSeconds = 0;
-  @state() retryCount = 0;
-  @state() connecting = false;
-  @state() pendingSeconds = 0;
 
   private client: GoogleGenAI;
   private session: Session;
@@ -68,22 +64,11 @@ export class GdmLiveAudio extends LitElement {
   private audioService: AudioService;
   private readonly CONTEXT_WINDOW_SIZE = 1_000_000;
   private lastLoggedSources = '';
-  // Connection management & playback guards
-  private sessionGenCounter = 0;
-  private currentSessionGen = 0;
-  private reconnectAttempts = 0;
-  private reconnectTimer: number | null = null;
-  private isConnecting = false;
-  private lastInterruptAt = 0;
-  private healthTimer: number | null = null;
-  private lastBufferState: 'healthy' | 'warn' | 'err' | 'high' | 'normal' | 'idle' | null = null;
-  private lastConnectingState: boolean | null = null;
-  private stopAutoReconnect = false;
-  private currentModel: string | null = null;
-  private unsupportedModels = new Set<string>();
-  private sessionOpen = false;
 
-  private models: string[] = [];
+  private readonly models = [
+    'gemini-2.5-flash-preview-native-audio-dialog',
+    'gemini-live-2.5-flash-preview',
+  ];
 
   static styles = css`
     :host {
@@ -101,37 +86,11 @@ export class GdmLiveAudio extends LitElement {
     this.contentAnalysisManager = new ContentAnalysisManager(this.client);
     this.audioService = new AudioService({
       onInputAudio: (audioBlob) => {
-        if (this.sessionOpen && this.isRecording) {
-          try {
-            this.session.sendRealtimeInput({media: audioBlob});
-          } catch (err) {
-            // Avoid noisy console spam when socket is closing/closed
-            this.sessionOpen = false;
-          }
+        if (this.session && this.isRecording) {
+          this.session.sendRealtimeInput({media: audioBlob});
         }
       },
     });
-
-    // Configure model fallback order from env or defaults
-    const envModels = (process.env.LIVE_MODELS || '')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const defaultModels = [
-      // Prefer estável (se disponível na sua região/conta)
-      'gemini-live-2.5-flash',
-      // Quase equivalente de áudio Live (preview), funciona bem em muitas regiões
-      'gemini-2.5-flash-preview-native-audio-dialog',
-      // Fallbacks econômicos e amplamente disponíveis
-      'gemini-live-2.0-flash',
-      'gemini-live-1.5-flash-8b',
-    ];
-    const LAST_MODEL_KEY = 'gemini-last-model';
-    const configured = envModels.length ? envModels : defaultModels;
-    const last = localStorage.getItem(LAST_MODEL_KEY);
-    this.models = last && configured.includes(last)
-      ? [last, ...configured.filter((m) => m !== last)]
-      : configured;
 
     // Expose audio nodes for the visualizer
     this.inputNode = this.audioService.inputNode;
@@ -140,79 +99,6 @@ export class GdmLiveAudio extends LitElement {
     this.logEvent('Assistente inicializado.', 'info');
     this.loadSessionsFromStorage();
     this.initSession();
-
-    // Periodically sample playback buffer and connection state
-    this.healthTimer = window.setInterval(() => {
-      this.bufferSeconds = this.audioService.getBufferedOutputSeconds();
-      this.pendingSeconds = this.audioService.getPendingOutputSeconds();
-      this.retryCount = this.reconnectAttempts;
-      this.connecting = this.isConnecting;
-
-      // Log connection state changes
-      if (this.lastConnectingState !== this.connecting) {
-        this.lastConnectingState = this.connecting;
-        this.logEvent(
-          this.connecting ? 'Estado de conexão: Conectando...' : 'Estado de conexão: Conectado.',
-          this.connecting ? 'info' : 'connect',
-        );
-      }
-
-      // Log buffer health changes
-      const ms = Math.round(this.bufferSeconds * 1000);
-      const activeOutput = this.audioService.hasActiveOutput();
-      const state: typeof this.lastBufferState = !activeOutput && ms === 0
-        ? 'idle'
-        : ms < 60
-        ? 'err'
-        : ms < 120
-        ? 'warn'
-        : ms > 500
-        ? 'high'
-        : ms >= 200 && ms <= 350
-        ? 'healthy'
-        : 'normal';
-
-      if (state !== this.lastBufferState) {
-        this.lastBufferState = state;
-        switch (state) {
-          case 'healthy':
-            this.logEvent(
-              `Buffer saudável: ${ms} ms (alvo 200–350 ms).`,
-              'info',
-            );
-            break;
-          case 'warn':
-            this.logEvent(
-              `Buffer baixo: ${ms} ms (risco de engasgos). Sugestões: aumentar prebuffer para 300–350 ms e/ou margem para 60–70 ms.`,
-              'info',
-            );
-            break;
-          case 'err':
-            this.logEvent(
-              `Buffer crítico: ${ms} ms (engasgos prováveis).`,
-              'error',
-            );
-            break;
-          case 'high':
-            this.logEvent(
-              `Buffer alto: ${ms} ms (latência maior). Sugestão: reduzir prebuffer para ~250–300 ms.`,
-              'info',
-            );
-            break;
-          case 'idle':
-            // Do not log idle states to avoid noise
-            break;
-        }
-      }
-    }, 500);
-  }
-
-  disconnectedCallback(): void {
-    super.disconnectedCallback();
-    if (this.healthTimer) {
-      clearInterval(this.healthTimer);
-      this.healthTimer = null;
-    }
   }
 
   private logEvent(message: string, type: TimelineEvent['type']) {
@@ -222,31 +108,15 @@ export class GdmLiveAudio extends LitElement {
       second: '2-digit',
     });
     const newEvent: TimelineEvent = {timestamp, message, type};
-    const MAX_EVENTS = 300;
-    const next = [newEvent, ...this.timelineEvents];
-    this.timelineEvents = next.length > MAX_EVENTS ? next.slice(0, MAX_EVENTS) : next;
+    this.timelineEvents = [newEvent, ...this.timelineEvents];
   }
 
   private async initSession(newSystemInstruction?: string) {
-    // Start new generation; cancel pending reconnects
-    const generation = ++this.sessionGenCounter;
-    this.currentSessionGen = generation;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-    this.reconnectAttempts = 0;
-    this.isConnecting = true;
-    this.stopAutoReconnect = false;
     if (this.isRecording) {
       this.stopRecording();
     }
     if (this.session) {
-      try {
-        if (this.sessionOpen) this.session.close();
-      } catch {}
-      this.sessionOpen = false;
-      // Do not null `this.session` here: callbacks may still reference it until closed
+      this.session.close();
     }
 
     this.systemInstruction =
@@ -283,22 +153,12 @@ export class GdmLiveAudio extends LitElement {
           model: model,
           callbacks: {
             onopen: () => {
-              if (generation !== this.currentSessionGen) return; // stale
               this.logEvent(`Conexão estabelecida com ${model}.`, 'connect');
               if (this.analyses.length === 0) {
                 this.updateStatus('Conectado');
               }
-              this.isConnecting = false;
-              this.connecting = false;
-              this.reconnectAttempts = 0;
-              this.currentModel = model;
-              this.sessionOpen = true;
-              try {
-                localStorage.setItem('gemini-last-model', model);
-              } catch {}
             },
             onmessage: async (message: LiveServerMessage) => {
-              if (generation !== this.currentSessionGen) return; // stale
               const audio =
                 message.serverContent?.modelTurn?.parts[0]?.inlineData;
 
@@ -340,36 +200,17 @@ export class GdmLiveAudio extends LitElement {
               }
 
               const interrupted = message.serverContent?.interrupted;
-              if (interrupted && this.isRecording) {
-                const now = Date.now();
-                if (now - this.lastInterruptAt > 300) {
-                  this.audioService.interruptPlayback();
-                  this.lastInterruptAt = now;
-                }
+              if (interrupted) {
+                this.audioService.interruptPlayback();
               }
             },
             onerror: (e: ErrorEvent) => {
-              if (generation !== this.currentSessionGen) return; // stale
               this.updateError(e.message);
               this.logEvent(`Erro de conexão: ${e.message}`, 'error');
-              this.isConnecting = false;
-              this.connecting = false;
-              // Handle fatal model issues (unsupported/not found)
-              if (this.isUnsupportedLiveError(e.message)) {
-                this.handleUnsupportedModel(model, e.message);
-              }
-              this.handleConnectionIssue(e.message);
-              if (!this.stopAutoReconnect) {
-                this.scheduleReconnect(generation, e.message);
-              }
             },
             onclose: (e: CloseEvent) => {
-              if (generation !== this.currentSessionGen) return; // stale
               this.updateStatus('Conexão fechada: ' + e.reason);
               this.logEvent(`Conexão fechada: ${e.reason}`, 'disconnect');
-              this.isConnecting = false;
-              this.connecting = false;
-              this.sessionOpen = false;
               // If we were recording when the connection dropped, stop the recording.
               if (this.isRecording) {
                 this.audioService.stop();
@@ -381,13 +222,6 @@ export class GdmLiveAudio extends LitElement {
                   'Gravação interrompida devido à desconexão.',
                   'record',
                 );
-              }
-              if (this.isUnsupportedLiveError(e.reason)) {
-                this.handleUnsupportedModel(model, e.reason || 'unsupported');
-              }
-              this.handleConnectionIssue(e.reason || 'closed');
-              if (!this.stopAutoReconnect) {
-                this.scheduleReconnect(generation, e.reason || 'closed');
               }
             },
           },
@@ -409,97 +243,8 @@ export class GdmLiveAudio extends LitElement {
 
     // If the loop completes, it means all models failed to connect.
     if (lastError) {
-      if (generation === this.currentSessionGen) {
-        this.updateError(
-          `Falha ao conectar ao assistente: ${lastError.message}`,
-        );
-        this.isConnecting = false;
-        this.connecting = false;
-        if (this.isUnsupportedLiveError(lastError.message) && this.currentModel) {
-          this.handleUnsupportedModel(this.currentModel, lastError.message);
-        }
-        this.handleConnectionIssue(lastError.message);
-        if (!this.stopAutoReconnect) {
-          this.scheduleReconnect(generation, lastError.message);
-        }
-      }
+      this.updateError(`Falha ao conectar ao assistente: ${lastError.message}`);
     }
-  }
-
-  private scheduleReconnect(gen: number, reason: string) {
-    if (gen !== this.currentSessionGen) return; // stale
-    if (this.stopAutoReconnect) return; // disabled due to fatal condition
-    if (this.reconnectTimer) return; // already scheduled
-    if (this.isConnecting) return; // in-flight
-    // If we ran out of models, stop
-    if (this.models.filter((m) => !this.unsupportedModels.has(m)).length === 0) {
-      this.logEvent(
-        'Nenhum modelo Live compatível disponível nesta conta/região.',
-        'error',
-      );
-      this.updateError(
-        'Nenhum modelo Live compatível disponível. Ajuste sua lista de modelos ou verifique a região/billing.',
-      );
-      return;
-    }
-    const attempt = ++this.reconnectAttempts;
-    this.retryCount = this.reconnectAttempts;
-    if (attempt > 5) {
-      this.logEvent('Reconexão cancelada após várias tentativas.', 'error');
-      return;
-    }
-    const base = 500;
-    const jitter = Math.random() * 200;
-    const delay = Math.min(base * 2 ** (attempt - 1) + jitter, 5000);
-    this.logEvent(
-      `Tentando reconectar (tentativa ${attempt}) em ${Math.round(delay)}ms.`,
-      'info',
-    );
-    this.reconnectTimer = window.setTimeout(() => {
-      if (gen !== this.currentSessionGen) return;
-      this.reconnectTimer = null;
-      this.isConnecting = true;
-      this.connecting = true;
-      // Filter unsupported models from this session's order
-      this.models = this.models.filter((m) => !this.unsupportedModels.has(m));
-      this.initSession(this.systemInstruction);
-    }, delay);
-  }
-
-  private isQuotaError(msg: string): boolean {
-    return /quota|billing|exceeded|insufficient|payment|429/i.test(msg || '');
-  }
-
-  private handleConnectionIssue(context: string) {
-    if (this.isQuotaError(context)) {
-      this.stopAutoReconnect = true;
-      this.updateError(
-        'Cota do modelo excedida. Verifique seu plano/billing e tente novamente.',
-      );
-      this.logEvent(
-        'Cota excedida: reconexão pausada. Ajuste o billing e clique em Reiniciar.',
-        'error',
-      );
-    }
-  }
-
-  private isUnsupportedLiveError(msg: string): boolean {
-    return /not\s+found.*v1beta|not\s+supported.*bidiGenerateContent|ListMod/i.test(
-      msg || '',
-    );
-  }
-
-  private handleUnsupportedModel(model: string, reason: string) {
-    this.unsupportedModels.add(model);
-    this.models = this.models.filter((m) => m !== model);
-    try {
-      const last = localStorage.getItem('gemini-last-model');
-      if (last === model) localStorage.removeItem('gemini-last-model');
-    } catch {}
-    this.logEvent(
-      `Modelo não compatível com Live nesta API: ${model}. Alternando para o próximo. (${reason})`,
-      'error',
-    );
   }
 
   private updateStatus(msg: string) {
@@ -839,10 +584,6 @@ export class GdmLiveAudio extends LitElement {
           .showHistoryModal=${this.showHistoryModal}
           .savedSessions=${this.savedSessions}
           .activePersona=${this.activePersona}
-          .bufferSeconds=${this.bufferSeconds}
-          .pendingSeconds=${this.pendingSeconds}
-          .retryCount=${this.retryCount}
-          .isConnecting=${this.connecting}
           @analysis-submit=${this.handleAnalysisSubmit}
           @analysis-remove=${this.removeAnalysis}
           @start-recording=${this.startRecording}

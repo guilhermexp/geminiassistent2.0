@@ -39,11 +39,6 @@ export class GdmLiveAudioVisuals extends LitElement {
 
   private canvas: HTMLCanvasElement;
   private canvasCtx: CanvasRenderingContext2D;
-  private rafId: number | null = null;
-  private isAnimating = false;
-  private idleTimer: number | null = null;
-  private inactiveFrames = 0;
-  private readonly INACTIVE_FRAMES_TO_PAUSE = 120; // ~2s
 
   static styles = css`
     canvas {
@@ -54,73 +49,7 @@ export class GdmLiveAudioVisuals extends LitElement {
 
   connectedCallback() {
     super.connectedCallback();
-    this.startIdleProbe();
-  }
-
-  disconnectedCallback(): void {
-    super.disconnectedCallback();
-    this.stop();
-    this.stopIdleProbe();
-  }
-
-  private start() {
-    if (this.isAnimating) return;
-    this.isAnimating = true;
-    const tick = () => {
-      if (!this.isAnimating) return;
-      this.rafId = requestAnimationFrame(tick);
-      this.visualize();
-      // Auto-pause when low activity
-      const level = this.getActivityLevel();
-      if (level < 8) {
-        this.inactiveFrames++;
-        if (this.inactiveFrames >= this.INACTIVE_FRAMES_TO_PAUSE) {
-          this.stop();
-          this.startIdleProbe();
-          this.inactiveFrames = 0;
-        }
-      } else {
-        this.inactiveFrames = 0;
-      }
-    };
-    this.rafId = requestAnimationFrame(tick);
-  }
-
-  private stop() {
-    this.isAnimating = false;
-    if (this.rafId !== null) {
-      cancelAnimationFrame(this.rafId);
-      this.rafId = null;
-    }
-  }
-
-  private startIdleProbe() {
-    if (this.idleTimer) return;
-    this.idleTimer = window.setInterval(() => {
-      this.inputAnalyser?.update();
-      this.outputAnalyser?.update();
-      if (this.getActivityLevel() >= 12) {
-        this.stopIdleProbe();
-        this.start();
-      }
-    }, 300);
-  }
-
-  private stopIdleProbe() {
-    if (this.idleTimer) {
-      clearInterval(this.idleTimer);
-      this.idleTimer = null;
-    }
-  }
-
-  private getActivityLevel(): number {
-    if (!this.inputAnalyser || !this.outputAnalyser) return 0;
-    const bins = [0, 1, 2, 3];
-    let sum = 0;
-    for (const i of bins) {
-      sum += (this.inputAnalyser.data[i] || 0) + (this.outputAnalyser.data[i] || 0);
-    }
-    return sum / (bins.length * 2);
+    this.visualize();
   }
 
   private visualize() {
@@ -169,17 +98,13 @@ export class GdmLiveAudioVisuals extends LitElement {
         x += barWidth;
       }
     }
-    // draw-only; RAF loop managed by start/stop
+    requestAnimationFrame(() => this.visualize());
   }
 
   protected firstUpdated() {
     this.canvas = this.shadowRoot!.querySelector('canvas');
-    const hc = navigator.hardwareConcurrency || 8;
-    const dm = (navigator as any).deviceMemory || 8;
-    const lowTier = hc <= 4 || dm <= 4;
-    const size = lowTier ? 300 : 400;
-    this.canvas.width = size;
-    this.canvas.height = size;
+    this.canvas.width = 400;
+    this.canvas.height = 400;
     this.canvasCtx = this.canvas.getContext('2d');
   }
 
