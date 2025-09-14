@@ -17,12 +17,10 @@
     "mammoth": "1.8.0",
     "marked": "13.0.1",
     "jspdf": "2.5.1",
-    "html2canvas": "1.4.1",
-    "ws": "8.16.0"
+    "html2canvas": "1.4.1"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
-    "@types/ws": "8.5.10",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }
